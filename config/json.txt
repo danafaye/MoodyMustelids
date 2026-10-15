@@ -1,0 +1,12 @@
+ "coworkUserFilesPath": "/home/svc_chromebooklinuxenv/Claude",
+  "mcpServers": {
+    "ghidra": {
+      "command": "/home/svc_chromebooklinuxenv/GhidraMCP/venv/bin/python",
+      "args": [
+        "/home/svc_chromebooklinuxenv/GhidraMCP/bridge_mcp_ghidra.py",
+        "--ghidra-server",
+        "http://127.0.0.1:8080/"
+      ]
+    }
+  }
+}
