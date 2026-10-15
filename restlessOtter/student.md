@@ -1,0 +1,299 @@
+# restlessotter: Student Guide
+
+**Goal:** Use your AI assistant and Ghidra (through the Ghidra MCP) to work out what `restlessOtter` does. You'll find five findings, turn them into indicators of compromise (IOCs), map them to MITRE ATT&CK, and write a short analyst report.
+
+## How to work through this
+
+- Each step tells you **what to ask the assistant**. Type a version of it in your own words.
+- When the assistant finds a function or data item, ask it to **label** it with a name that says what it does. Your labeled Ghidra project is part of your submission.
+- Every answer gets a **confidence tag**:
+  - **[Code]**: you can point to the exact instruction or string that shows it.
+  - **[Inferred]**: you worked it out from code, but nothing in the binary states it directly.
+  - **[Sandbox]**: it needs the sandbox report to confirm. Mark it this way and check it in the sandbox section.
+- Each finding ends with a **Check**. Ask the assistant to confirm its answer a second way, such as reading raw bytes or cross-references. If the two methods disagree, keep working until they match.
+- Hints are included so you can get unstuck. Use them.
+
+> **Safety:** The static part of this exercise never executes `restlessOtter`. Don't run it yourself or ask the assistant to run it. Dynamic behavior comes only from the sandbox report your instructor provides.
+
+---
+
+## Setup: Get oriented
+
+**Step 1.** Ask the assistant for the program's name, architecture, and SHA-256 hash. Compare the SHA-256 with the `SHA256SUMS` file in your handout.
+
+SHA-256: ________________
+
+**Step 2.** Ask the assistant if the program is **dynamically** or **statically** linked, and what evidence it used.
+
+*Hint:* Look at the dynamic linker path and the library names in the strings, such as `/usr/lib/dyld` and `/usr/lib/libSystem.B.dylib`. Dynamically linked programs import library functions instead of containing their code.
+
+Answer: ________________ Evidence: ________________________________________________
+
+**Step 3.** Ask the assistant to sort the functions into three groups: written by the author, compiler or linker boilerplate, and library code. Ask it to count the functions in each group.
+
+*Hint:* Don't trust names alone. Check what each function calls and whether the import list includes it.
+
+Author: ______ Boilerplate: ______ Library: ______
+
+**Step 4.** Ask the assistant to find `main`. The Mach-O entry point is set in the binary's load commands, so start there. Ask the assistant to label `main`.
+
+*Hint:* Check the entry point addresses reported by `get_program_info`. The function that receives `argc` and `argv` is the program's `main`. Its first call prints a banner.
+
+`main` address: ________________
+
+**Check:** Ask the assistant to confirm the banner string and its cross-reference into `main`.
+
+---
+
+## Finding 1: The encrypted config
+
+**What's going on:** The program's settings are stored as encrypted bytes. A shared decoder function decrypts each string using a key stream. The decoded text is a list of `name=value` pairs separated by `;`.
+
+*Why it matters:* a plain `strings` scan won't show the hostnames, the campaign label, or the user-agent. You have to decode the blob the way the program does.
+
+**Step 1.** Ask the assistant to find the decoder function, label it, and describe how it produces each byte of output.
+
+*Hint:* The decoder is called with a source address, a length, and a seed. Look at the function it calls for each byte. It keeps a running state byte and updates it on every step.
+
+Decoder function: ________________ Key stream: ________________________________________________
+
+**Step 2.** Ask the assistant to find the call in `main` that decrypts the config. Ask it to report the source address, the length, and the seed.
+
+Source address: ________________ Length: ________________ Seed: ________________
+
+**Step 3.** Ask the assistant to decode the config and list each field. Ask which fields are the host, the path, the DNS probe target, the campaign, and the user agent.
+
+*Hint:* The config parser copies each field into a fixed offset in a structure. Find the offsets and which field each one holds.
+
+- `host` = ________________
+- `path` = ________________
+- `dns` = ________________
+- `campaign` = ________________
+- `agent` = ________________
+
+**Step 4.** Ask the assistant whether the program prints the decoded config when it runs, and which call prints it.
+
+Printed? ________________ Call: ________________________________________________
+
+**Check:** Ask the assistant to decode the first four bytes by hand from the key stream, and compare them with the first four decoded bytes it reported.
+
+**Predict (before the sandbox):** Will the sandbox show DNS lookups for the config hostnames? Write your prediction: ________________
+
+**Compare (sandbox report):** Did the sandbox show those lookups? ________________ Confidence tag for the config: ________________
+
+---
+
+## Finding 2: Network activity
+
+**What's going on:** When the program is run with exactly one argument, `main` runs two DNS probes and then makes one HTTP request. Without the argument, these steps don't run. The network code is in helper functions that `main` calls.
+
+*Why it matters:* the HTTP request uses a real public host, so the sandbox can show it. The request headers identify the program through the user agent.
+
+**Step 1.** Ask the assistant to list every call in `main` that does network work, in order. Ask it to label each helper function the author wrote, and to say what argument count `main` needs before these calls run.
+
+*Hint:* There are two calls to the same DNS helper, then one call to the phone-home helper. Check the argument count test that comes before them.
+
+Calls: ________________________________________________ Argument count needed: ________________
+
+**Step 2.** Ask the assistant which library function the DNS helper calls, and which config values it receives, in order.
+
+*Hint:* Look at what the helper passes into the library function. It is called twice from `main`, with different config values each time.
+
+Library function: ________________ Hostnames in order: ________________, ________________
+
+**Step 3.** Ask the assistant to label the address-hints struct and the request buffer. Then ask it to report:
+- the address family and socket type in the hints
+- the port number
+- the full request text, including the header lines
+- whether the program sets a timeout on the socket
+
+*Hint:* The hints struct is passed to `getaddrinfo`. The port is a short encrypted string, decoded with its own seed, and passed to the DNS helper and to the phone-home helper.
+
+Family and socket type: ________________ Port: ________________
+
+Request text: ________________________________________________
+
+Timeout? ________________
+
+**Step 4.** Ask the assistant what the program prints, if anything, after each of these fails: the DNS lookup, the connection, the send, and the receive.
+
+*Hint:* Look at the `if` checks after each library call, and at whether the helper calls any output function. A failure may print nothing, or it may skip to the next address.
+
+- DNS lookup fails: ________________________________________________
+- Connect fails: ________________________________________________
+- Send fails: ________________________________________________
+- Receive returns nothing: ________________________________________________
+
+**Step 5.** Ask the assistant to look up the DNS and host values from the config in Recorded Future and say whether each is reserved, an example name, or a shared service.
+
+- ________________ → ________________________________________________
+- ________________ → ________________________________________________
+
+**Check:** Ask the assistant to confirm the `GET` and `Host:` strings are both used inside the phone-home helper, and that the host in the `Host:` header comes from the same config field the connection uses.
+
+**Predict (before the sandbox):** What network connections will the sandbox show if the sample runs with one argument, and what will it show if it runs with none? Write your prediction: ________________
+
+**Compare (sandbox report):** Which connections appeared, and in what order? ________________ Did the sandbox show any network activity with no argument? ________________
+
+---
+
+## Finding 3: The anti-debugging check
+
+**What's going on:** When the program is run with one argument, it checks whether a debugger is attached. If one is, it prints a decoy flag instead of checking the ticket.
+
+**Step 1.** Ask the assistant to find the function that reads process information from the kernel. Ask it to label the function and report its address.
+
+*Hint:* The function calls `sysctl` with a management-information-base (MIB) array. The array includes the program's own process ID from `getpid`.
+
+Address: ________________ Function: ________________
+
+**Step 2.** Ask the assistant which bit of the process flags the function tests, and what value of that bit means "traced."
+
+*Hint:* On macOS, the process info structure has a flags field. Ask the assistant to name the flag constant and explain the bit mask.
+
+Flag field: ________________ Bit (mask): ________________ "Traced" means: ________________
+
+**Step 3.** Ask the assistant what `main` prints when the check says a debugger is attached, and which decoy flag it shows.
+
+Output: ________________________________________________
+
+**Step 4.** Ask the assistant when `main` calls this function, and which steps run before it. Ask whether the check protects the ticket check, the network steps, or both.
+
+*Hint:* Compare the argument count check with the calls to the DNS and phone-home helpers.
+
+Steps before the check: ________________________________________________ Protects: ________________
+
+**Check:** Ask the assistant to confirm that the check happens in one place in `main`, and which branch it takes when the process is traced.
+
+**Predict (before the sandbox):** Will the sandbox trigger the anti-debug branch? Why or why not? Write your prediction: ________________
+
+**Compare (sandbox report):** Did the report show the decoy output? ________________
+
+---
+
+## Finding 4: The ticket check
+
+**What's going on:** The program takes one 16-character ticket on the command line. It checks each byte with a small transform and compares the result to a fixed table. It also runs a rolling checksum over the bytes and checks the final value.
+
+*Hint on the shape:* each byte is XORed with a value that depends on its position, then has a position-based value added, then is rotated left by a position-based amount. You don't need to reverse a hash. You need to reverse each step.
+
+**Step 1.** Ask the assistant to find the ticket check, label it, and report the required length.
+
+*Hint:* Look for a length comparison against a constant before the per-byte loop.
+
+Function: ________________ Length: ________________
+
+**Step 2.** Ask the assistant to describe the transform on each byte, step by step. Ask it to label the serial table and report its address.
+
+*Hint:* The loop has three steps: an XOR with a position-based value, an addition of another position-based value, and a rotate. The rotate amount is based on the position mod 5.
+
+Steps: ________________________________________________ Serial table address: ________________
+
+**Step 3.** Ask the assistant to describe the rolling checksum. Ask it for the starting value and the value it must end at.
+
+Start value: ________________ End value: ________________
+
+**Step 4.** Ask the assistant to work out the one ticket that passes every step. Ask it to reverse each step for each position, and to show its reasoning. Don't run the program.
+
+*Hint:* For each position, reverse the rotate, then subtract the added value, then XOR with the XOR value.
+
+Ticket: ________________
+
+**Step 5.** Ask the assistant what `main` prints for the correct ticket, and what it prints for a wrong one.
+
+- Correct: ________________________________________________
+- Wrong: ________________________________________________
+
+**Check:** Ask the assistant to recompute the checksum from your ticket and confirm it matches the end value. Ask it to confirm the ticket is exactly 16 characters.
+
+---
+
+## Finding 5: The flag
+
+**What's going on:** When the ticket check passes, the program decrypts a 21-byte flag. The decryption uses the same key stream style as the config, but with a different seed. It also uses the ticket itself as part of the key.
+
+**Step 1.** Ask the assistant to find the function that reveals the flag. Ask it to label the encrypted flag blob, report its address, and report its length.
+
+Address: ________________ Length: ________________
+
+**Step 2.** Ask the assistant to describe how each output byte is computed from the blob, the key stream, and the ticket. Ask which ticket bytes it uses and how the position enters the calculation.
+
+*Hint:* The ticket is 16 bytes long, and the flag is 21 bytes. Look at how the index is reduced before reading the ticket.
+
+Ticket bytes used: ________________________________________________
+
+**Step 3.** Ask the assistant to decode the flag from your ticket. Report the seed it uses for the key stream.
+
+Seed: ________________ Flag: ________________
+
+**Step 4.** Ask the assistant to explain what `main` prints before the flag.
+
+Output: ________________________________________________
+
+**Check:** Ask the assistant to confirm the decoded flag is 21 characters, starts with `RO{`, and ends with `}`. Ask it to decode the flag again with a wrong ticket, and report what it gets.
+
+---
+
+## Indicators of compromise (IOCs)
+
+Fill this in from your findings. Add the source for each one, which is the address or string where you found it.
+
+| Type | Value | Source (address or string) | Confidence tag |
+|---|---|---|---|
+| Domain | | | |
+| Domain | | | |
+| Hostname (phone-home) | | | |
+| HTTP request | | | |
+| User agent | | | |
+| Campaign label | | | |
+| Port | | | |
+
+*Hint:* Config values are IOCs too. Note which ones are shared services and which are classroom labels, and look up only what needs a threat-intel lookup.
+
+---
+
+## MITRE ATT&CK mapping
+
+For each behavior, pick the technique ID and write the evidence. Ask the assistant to check your IDs against the ATT&CK site.
+
+| Behavior | Technique ID and name | Evidence (address or string) | Confidence tag |
+|---|---|---|---|
+| Config decrypted at runtime | | | |
+| DNS lookups and HTTP request | | | |
+| Debugger check with `sysctl` | | | |
+| Ticket validation | | | |
+| Flag decrypted at runtime | | | |
+
+*Hint:* Start from the technique families. Look at the "Defense Evasion" and "Discovery" tactics, and see which sub-techniques fit. Some behaviors may not have a clean technique match. Say so in your evidence column.
+
+---
+
+## Analyst report
+
+Write three short paragraphs. Keep each one under 100 words.
+
+1. **Summary:** What does the sample do, in plain language? What does the decoded flag tell you about the sample's goal?
+
+   ________________________________________________
+
+2. **Detection ideas:** Name two things a defender could alert on, using the IOCs and behaviors you found. Say why each one is reliable or fragile.
+
+   ________________________________________________
+
+3. **Sandbox comparison:** Which of your static findings did the sandbox confirm, and which did it not show? What does the difference tell you?
+
+   ________________________________________________
+
+---
+
+## Submission checklist
+
+- [ ] `main` labeled and its address recorded
+- [ ] Helpers labeled (decoder, DNS probe, phone-home, debugger check, ticket check)
+- [ ] Data labeled (config blob, serial table, flag blob)
+- [ ] Findings 1–5 answered, each with a confidence tag and a second-method check
+- [ ] Predictions written before the sandbox report, and compared after
+- [ ] IOC table filled in with sources
+- [ ] ATT&CK mapping filled in with evidence
+- [ ] Analyst report written
+- [ ] Ticket and flag recorded
