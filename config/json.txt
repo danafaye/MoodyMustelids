@@ -1,4 +1,6 @@
- "coworkUserFilesPath": "/home/svc_chromebooklinuxenv/Claude",
+vim ~/.config/Claude/claude_desktop_config.json
+
+"coworkUserFilesPath": "/home/svc_chromebooklinuxenv/Claude",
   "mcpServers": {
     "ghidra": {
       "command": "/home/svc_chromebooklinuxenv/GhidraMCP/venv/bin/python",
