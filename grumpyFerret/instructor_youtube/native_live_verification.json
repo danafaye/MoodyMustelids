@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "returncode": 0,
+  "api_key_supplied": false,
+  "login_supplied": false,
+  "fixtures_used": false,
+  "original_dns_probes_skipped": true,
+  "binary_sha256": "54220083001c25e725effdd77ac4b1e2fc23c6061763b3db8bb92332d2ef5187"
+}

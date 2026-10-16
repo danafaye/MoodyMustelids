@@ -4,7 +4,7 @@
  * (dynamic behavior), and Recorded Future MCP (indicator triage) together.
  *
  * This binary does nothing harmful. It:
- *   - prints a banner and a lock string (like a malware campaign tag)
+ *   - prints a banner
  *   - decodes an embedded XOR'd "config" containing 4 network-looking
  *     indicators (two are intentionally fake/reserved, one is a real but
  *     totally benign domain, for the RF-lookup teaching moment)
@@ -17,7 +17,10 @@
  *   - validates a 12-character serial (argv[1]) against a byte-transform
  *     check; the correct serial reveals an XOR'd flag string
  *
- * Build: see Makefile. No special libraries required beyond libc.
+ * Additional classroom stage: decode an embedded Python resolver, read a
+ * YouTube comment, extract a sentence acrostic and retrieve a GitHub text flag.
+ * No downloaded content is executed. Requires Python 3 for this stage.
+ * Build: see Makefile. No special link libraries required beyond libc.
  */
 
 #include <stdio.h>
@@ -30,12 +33,13 @@
 #include <sys/select.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <sys/wait.h>
+#include "youtube_stage.h"
 
 /* ---- decoys: present in `strings` output on purpose ---- */
 static const char *decoy_flag_1   = "GF{TRY_AGAIN_LOSER}";
 static const char *decoy_flag_2   = "GF{404_FLAG_NOT_HERE}";
 static const char *decoy_note     = "backup_flag=GF{NICE_TRY}";
-static const char *lock_string    = "grumpyferret_singleinstance_lock";
 static const char *banner_str     =
     "grumpyferret v1.0 -- \"ferret?\"\n";
 
@@ -77,7 +81,6 @@ static const unsigned char FLAG_BLOB[FLAG_LEN] = {
 
 static void gf_banner(void) {
     fputs(banner_str, stdout);
-    fprintf(stdout, "[*] lock: %s\n", lock_string);
 }
 
 /* Reads /proc/self/status looking for a nonzero TracerPid.
@@ -131,38 +134,18 @@ static void gf_decode_config(gf_config_t *out) {
         field = strtok(NULL, ";");
     }
 
-    fprintf(stdout, "[*] decoded config:\n");
-    fprintf(stdout, "    ens      = %s\n", out->ens);
-    fprintf(stdout, "    ip       = %s\n", out->ip);
-    fprintf(stdout, "    domain   = %s\n", out->domain);
-    fprintf(stdout, "    safe     = %s\n", out->safe);
-    fprintf(stdout, "    campaign = %s\n", out->campaign);
 }
 
-/* Best-effort DNS probe. Prints the outcome; never fatal. */
+/* Best-effort DNS probe. Silent: the lookup still happens and shows in the
+ * sandbox, but the host name is not printed. Never fatal. */
 static void gf_dns_probe(const char *host) {
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    fprintf(stdout, "[*] resolving %s ... ", host);
-    fflush(stdout);
-    int rc = getaddrinfo(host, NULL, &hints, &res);
-    if (rc != 0) {
-        fprintf(stdout, "failed (%s)\n", gai_strerror(rc));
-        return;
-    }
-    char ipstr[INET6_ADDRSTRLEN] = {0};
-    if (res->ai_family == AF_INET) {
-        struct sockaddr_in *a = (struct sockaddr_in *)res->ai_addr;
-        inet_ntop(AF_INET, &a->sin_addr, ipstr, sizeof(ipstr));
-    } else if (res->ai_family == AF_INET6) {
-        struct sockaddr_in6 *a = (struct sockaddr_in6 *)res->ai_addr;
-        inet_ntop(AF_INET6, &a->sin6_addr, ipstr, sizeof(ipstr));
-    }
-    fprintf(stdout, "resolved -> %s\n", ipstr[0] ? ipstr : "(unknown)");
-    freeaddrinfo(res);
+    if (getaddrinfo(host, NULL, &hints, &res) == 0)
+        freeaddrinfo(res);
 }
 
 /* Safe, real "phone home": a public-IP check service, same trick used by
@@ -170,27 +153,22 @@ static void gf_dns_probe(const char *host) {
  * so this never hangs a demo. */
 static void gf_phone_home(void) {
     const char *host = "api.ipify.org";
-    fprintf(stdout, "[*] phoning home to %s ... ", host);
-    fflush(stdout);
 
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, "80", &hints, &res) != 0) {
-        fprintf(stdout, "dns failed\n");
+    if (getaddrinfo(host, "80", &hints, &res) != 0)
         return;
-    }
 
     int fd = socket(res->ai_family, SOCK_STREAM, 0);
-    if (fd < 0) { fprintf(stdout, "socket failed\n"); freeaddrinfo(res); return; }
+    if (fd < 0) { freeaddrinfo(res); return; }
 
     struct timeval tv = { .tv_sec = 3, .tv_usec = 0 };
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     if (connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
-        fprintf(stdout, "connect failed (%s)\n", strerror(errno));
         close(fd);
         freeaddrinfo(res);
         return;
@@ -199,20 +177,49 @@ static void gf_phone_home(void) {
 
     const char req[] = "GET / HTTP/1.0\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n";
     if (write(fd, req, sizeof(req) - 1) < 0) {
-        fprintf(stdout, "write failed\n");
         close(fd);
         return;
     }
 
     char resp[256] = {0};
     ssize_t n = read(fd, resp, sizeof(resp) - 1);
+    (void)n;
     close(fd);
-    if (n > 0) {
-        /* just show the tail of the response (usually the IP body) */
-        fprintf(stdout, "ok, got %zd bytes\n", n);
-    } else {
-        fprintf(stdout, "no response\n");
+}
+
+
+/* A benign, interpreted comment resolver embedded in the ELF. Python 3 is
+ * required at runtime. Downloaded bytes are a printed text flag, never code. */
+/* The stage always runs its network reads (so sandbox telemetry is the same),
+ * but its output, including the text flag, is shown only when `reveal` is set,
+ * i.e. after the serial has been accepted. */
+static void gf_youtube_stage(int reveal) {
+    char *script = calloc(sizeof GF_YT_STAGE + 1, 1);
+    if (!script) return;
+    for (size_t i = 0; i < sizeof GF_YT_STAGE; i++)
+        script[i] = (char)(GF_YT_STAGE[i] ^ CONFIG_KEY[i % 4]);
+    fflush(NULL);
+    pid_t child = fork();
+    if (child == 0) {
+        if (!reveal) {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO);
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
+        }
+        execl("/usr/bin/python3", "python3", "-c", script, (char *)NULL);
+        _exit(127);
     }
+    if (child > 0) {
+        int status;
+        while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    } else {
+        fputs("[!] Could not start classroom comment resolver.\n", stderr);
+    }
+    memset(script, 0, sizeof GF_YT_STAGE);
+    free(script);
 }
 
 static int gf_validate_serial(const char *input) {
@@ -239,16 +246,20 @@ int main(int argc, char **argv) {
     gf_config_t cfg;
     gf_decode_config(&cfg);
 
-    gf_dns_probe(cfg.domain);
-    gf_dns_probe(cfg.ens);
-    gf_dns_probe(cfg.safe);
-    gf_phone_home();
+    if (!getenv("GF_OFFLINE")) {
+        gf_dns_probe(cfg.domain);
+        gf_dns_probe(cfg.ens);
+        gf_dns_probe(cfg.safe);
+        gf_phone_home();
+    }
+    /* Decide before the stage runs: its flag output depends on the serial. */
+    int solved = argc >= 2 && !gf_check_debugger() && gf_validate_serial(argv[1]);
+    gf_youtube_stage(solved);
 
     if (argc < 2) {
         fprintf(stdout,
-            "\nusage: %s <serial>\n"
-            "  (a valid serial is %d characters)\n",
-            argv[0], SERIAL_LEN);
+            "\nusage: %s <serial>\n",
+            argv[0]);
         return 0;
     }
 

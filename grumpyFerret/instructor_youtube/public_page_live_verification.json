@@ -1,0 +1,24 @@
+{
+  "mode": "unauthenticated public-page reader",
+  "video_id": "4ok4e0Jvy_4",
+  "status": "passed",
+  "api_key_required": false,
+  "requests": [
+    {
+      "kind": "watch page",
+      "method": "GET"
+    },
+    {
+      "kind": "comments continuation",
+      "method": "POST"
+    },
+    {
+      "kind": "public Gist",
+      "method": "GET"
+    }
+  ],
+  "comments_examined": 9,
+  "matched_comment_id": "UgwFmUzd3_jsrLSUJ2B4AaABAg",
+  "flag_download": "verified",
+  "flag_url": "https://gist.githubusercontent.com/danafaye/8100c9037cdd799741c405d7b34a37f2/raw/710fef32e945a23fe1482de52dd446e54d1de7d8/newbie_notes.txt"
+}

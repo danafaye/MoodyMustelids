@@ -43,7 +43,7 @@ Stages (with function or call for each): _______________________________________
 
 **What to look for in Ghidra:**
 - The entry point calls startup code, which eventually calls `main`. Follow the chain until you reach the function that prints the banner string.
-- The PE has two TLS callbacks. They run before the entry point, so check them too. Ask the assistant what each one does.
+- The PE has two TLS callbacks. They run before the entry point, so check them too. Ask the assistant what each one does, and whether the author wrote it.
 - The imports appear in the Symbol Tree, grouped by DLL name. The DLL names tell you what kinds of behavior to expect.
 
 **Check:** Ask the assistant to confirm the banner string and the build tag, and their cross-references into `main`.
@@ -52,15 +52,15 @@ Stages (with function or call for each): _______________________________________
 
 ## Finding 1: The hidden config (stack strings)
 
-**What's going on:** The program's config values, such as the mutex name and the domains, are not stored as text anywhere in the file. The program builds each one one character at a time on the stack when it runs. A plain `strings` scan won't find them.
+**What's going on:** The program's config values, such as the mutex name and the domains, are not stored as text anywhere in the file. The program builds each one one character at a time on the stack when it runs. A plain `strings` scan won't find them whole.
 
 *Why it matters:* this technique defeats a basic string scan. Analysts have to read the code that builds the string.
 
 **Step 1.** Ask the assistant to find the code in `main` that builds the config values. Ask it to label each block of code and say what value it builds.
 
-*Hint:* The values are built inside `main`, not in separate functions. Look for long runs of single-character copies into local buffers. Each copy reads from a fixed address in the data section.
+*Hint:* The values are built inside `main`, not in separate functions. Look for long runs of single-character copies into local buffers. Each copy reads from a fixed address in the data section, or from an immediate value in the instruction.
 
-Builder functions and values: ________________________________________________
+Where each value is built, and the value: ________________________________________________
 
 **Step 2.** Ask the assistant to rebuild each value from its builder code, in the order the characters are written.
 
@@ -79,17 +79,21 @@ Builder functions and values: ________________________________________________
 Explanation: ________________________________________________
 
 **What to look for in Ghidra:**
-- Long runs of single-character copies in `main`. Each one reads from a fixed data address, and the decompiler shows each as its own assignment, such as `local_378[0] = s_SoggyBadgerSingleton_Mut_14000a370[0]`.
+- Long runs of single-character copies in `main`. Some copies read from a data label, and others store a fixed number directly into the buffer. Use the decompiler and the listing together.
 - Some values are copied from one data string that holds several values joined together. `strings` shows that joined string.
 - The copies all happen in `main`, before the registry step.
 
 **Check:** Ask the assistant to confirm that the values it rebuilt are the ones `main` prints on its config line.
 
+**Predict (before the sandbox):** Will the sandbox output show the config values, even though the strings scan did not? Write your prediction: ________________
+
+**Compare (sandbox report):** Did the sandbox show the config line? ________________ Confidence tag for the config: ________________
+
 ---
 
 ## Finding 2: Host telemetry and network activity
 
-**What's going on:** Before anything else, `main` creates a named mutex, writes a value to the registry, looks up two domains, and makes one HTTP request. All of this runs whether or not anything is watching the process.
+**What's going on:** Before anything else, `main` creates a named mutex, writes a value to the registry, looks up two domains, and makes one HTTP request. All of this runs whether or not anything is watching the process, and whether or not the program was given an argument.
 
 **Step 1.** Ask the assistant to find the mutex call. Ask it to report the mutex name, and whether the program checks for an existing one.
 
@@ -127,7 +131,7 @@ Functions: ________________ URL: ________________
 - A helper that `main` calls twice with config values. Inside it, `getaddrinfo` does the lookup.
 - `InternetOpenA` and `InternetOpenUrlA`, with the URL built by a sprintf-style helper.
 
-**Check:** Ask the assistant to confirm the mutex name and the registry key appear in `main` through their builder functions, and that the `snprintf` URL comes from the safe domain.
+**Check:** Ask the assistant to confirm the mutex name and the registry key appear in `main` through their builder code, and that the `snprintf` URL comes from the safe domain.
 
 **Predict (before the sandbox):** Which host-based and network events will the sandbox show, and in what order? Write your prediction: ________________
 
@@ -180,11 +184,11 @@ Steps before the gate: ________________________________________________
 
 *Hint on the hash shape:* for each character, rotate the running value right by 13 bits, then add the character's value. Analysts use this style of hash to hide the names of Windows functions a program calls.
 
-**Step 1.** Ask the assistant to find the hash function and label it. Ask it to describe the steps in plain language.
+**Step 1.** Ask the assistant to find the hash loop and label it. Ask it to describe the steps in plain language.
 
 *Hint:* Look for a loop over the characters of a string, with a rotate and an add in each step.
 
-Hash function: ________________ Steps: ________________________________________________
+Hash loop: ________________ Steps: ________________________________________________
 
 **Step 2.** Ask the assistant for the 32-bit target value the hash is compared against, and the code that compares them.
 
@@ -209,13 +213,17 @@ Matching candidate: ________________ Its hash: ________________
 
 **Check:** Ask the assistant to hash your matching candidate again with the same steps, and confirm it equals the target. Ask it to check that no other imported DLL name matches.
 
+**Predict (before the sandbox):** What will the sandbox print if it runs the program with no argument? Write your prediction: ________________
+
+**Compare (sandbox report):** Which output appeared? ________________
+
 ---
 
 ## Finding 5: The flag
 
 **What's going on:** When the unlock check passes, the program decodes a flag from XOR-encoded data. The key is 6 bytes long.
 
-**Step 1.** Ask the assistant to find the flag decode loop in the function that reveals the flag. Ask it to label the encoded data and the key, and report their lengths.
+**Step 1.** Ask the assistant to find the flag decode loop in the code that runs after a correct match. Ask it to label the encoded data and the key, and report their lengths.
 
 *Hint:* The loop uses the key's position with `% 6`. Work out the key length from that.
 
@@ -234,6 +242,10 @@ Output: ________________________________________________
 - The result is printed with a "hash matched" message before the flag.
 
 **Check:** Ask the assistant to confirm the decoded flag is 21 characters, starts with `SB{`, and ends with `}`.
+
+**Predict (before the sandbox):** Will the sandbox ever print the real flag? Write your prediction: ________________
+
+**Compare (sandbox report):** Did the report show a flag, and which one? ________________
 
 ---
 
@@ -294,8 +306,8 @@ Write three short paragraphs. Keep each one under 100 words.
 ## Submission checklist
 
 - [ ] `main` labeled and its address recorded
-- [ ] Config builder functions labeled
-- [ ] Hash function, target, and matching candidate labeled
+- [ ] Config builder code in `main` labeled
+- [ ] Hash loop, target, and matching candidate labeled
 - [ ] Findings 1–5 answered, each with a confidence tag and a second-method check
 - [ ] Predictions written before the sandbox report, and compared after
 - [ ] IOC table filled in with sources

@@ -1,0 +1,16 @@
+{
+  "kind": "youtube#commentThreadListResponse",
+  "items": [
+    {
+      "snippet": {
+        "videoId": "4ok4e0Jvy_4",
+        "topLevelComment": {
+          "id": "CLASSROOM_FIXTURE_NOT_A_LIVE_COMMENT",
+          "snippet": {
+            "textDisplay": "Nice walkthrough of the platform. Everything feels easier to follow with a concrete example. Watching the sandbox results alongside the investigation was especially useful. Breaking down the pivots step by step helped a lot. I would love to see more examples like this. Excellent starting point for a new analyst."
+          }
+        }
+      }
+    }
+  ]
+}

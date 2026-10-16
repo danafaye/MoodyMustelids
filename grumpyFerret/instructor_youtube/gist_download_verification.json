@@ -1,0 +1,11 @@
+{
+  "url": "https://gist.githubusercontent.com/danafaye/8100c9037cdd799741c405d7b34a37f2/raw/710fef32e945a23fe1482de52dd446e54d1de7d8/newbie_notes.txt",
+  "status": "passed",
+  "complete_youtube_chain": "not tested",
+  "sha256": "50e0a69b4829da0ef39c1bc93eebfcad551d3813590cd42913f4edd224164b8f",
+  "bytes": 34,
+  "checks": [
+    "Unauthenticated HTTPS download succeeded",
+    "Classroom text-flag format accepted"
+  ]
+}

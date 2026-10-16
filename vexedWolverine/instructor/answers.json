@@ -1,0 +1,8 @@
+{
+  "ticket": "7C9QAQUKEV2G7F9GJ2RL7BWKRXAF8DUE",
+  "flag": "VW{145f5ae89376cd6ab216878f1264fe994a0ff191}",
+  "vm_a_instructions": 513,
+  "vm_b_instructions": 2569,
+  "vm_b_real_registers": 8,
+  "rounds": 48
+}
